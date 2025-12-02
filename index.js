@@ -1,91 +1,196 @@
-// index.js - versión corregida
+// index.js - servidor para uploads + planillas (Express + multer + lowdb)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { Low } = require('lowdb');
+const { JSONFile } = require('lowdb/node');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const DOMAIN = process.env.DOMAIN || 'https://dea.mabcontrol.ar';
+const DOMAIN = (process.env.DOMAIN || `http://localhost:${PORT}`).replace(/\/$/, '');
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
+const PLANILLAS_DIR = path.join(UPLOADS_DIR, 'planillas');
 
-// Crear uploads si no existe
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+// ensure directories exist
+[UPLOADS_DIR, PLANILLAS_DIR].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
+
+// lowdb setup for simple metadata storage
+const dbFile = process.env.DB_FILE || 'db.json';
+const adapter = new JSONFile(dbFile);
+const db = new Low(adapter);
+
+async function initDb() {
+  await db.read();
+  db.data = db.data || { planillas: [] };
+  await db.write();
 }
 
-// Middlewares
-app.use(express.json({ limit: '5mb' }));
+// middlewares
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 const whitelist = [
   'http://127.0.0.1:5500',
+  'http://localhost:3000',
+  'http://localhost:3001',
   'http://dea.mabcontrol.ar',
   'https://dea.mabcontrol.ar',
   'https://www.dea.mabcontrol.ar'
 ];
 const corsOptions = {
   origin: function (origin, callback) {
-    // allow requests with no origin (like curl, mobile apps, server-to-server)
-    if (!origin || whitelist.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('No autorizado por CORS'));
-    }
+    if (!origin || whitelist.includes(origin)) callback(null, true);
+    else callback(new Error('No autorizado por CORS'));
   }
 };
 app.use(cors(corsOptions));
-
-// Servir archivos estáticos uploads
 app.use('/uploads', express.static(path.join(__dirname, UPLOADS_DIR)));
 
-// multer config
+// multer storage (files go to uploads/)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR + '/'),
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
 const upload = multer({ storage });
 
-// Ruta de subida de archivos desde front (already used)
+// --- Image upload endpoint (compatible con tu front)
 app.post('/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo.' });
-  const fileUrl = `${DOMAIN.replace(/\/$/, '')}/uploads/${req.file.filename}`;
-  return res.json({ imageUrl: fileUrl });
+  const fileUrl = `${DOMAIN}/uploads/${req.file.filename}`;
+  return res.json({ imageUrl: fileUrl, filename: req.file.filename });
 });
 
-// --- Nota: la ruta /protocolo a continuación usa `db`.
-// Si querés usarla, inicializá firebase-admin y definí `db`.
-// De lo contrario, borrala o adaptala.
-app.get('/protocolo', async (req, res) => {
-  // EJEMPLO: esto fallará si no inicializaste `db`
+// --- Create planilla
+// Accepts either application/json with body { data: {...}, images: [...] }
+// or multipart/form-data with field `planilla` (JSON string) and `images[]` files
+app.post('/planillas', upload.array('images'), async (req, res) => {
   try {
-    return res.status(501).json({ error: 'No implementado en este servidor. Inicializá firebase-admin o llamá a Firestore desde el front.' });
+    await initDb();
+    let planillaData = null;
+
+    if (req.is('application/json') || req.body.data) {
+      // JSON body: { data: {...}, images: [url,...] }
+      planillaData = req.body.data || req.body;
+    } else if (req.body.planilla) {
+      // multipart: text field 'planilla' with JSON string
+      try {
+        planillaData = JSON.parse(req.body.planilla);
+      } catch (e) {
+        return res.status(400).json({ error: 'Campo planilla no es JSON válido' });
+      }
+    } else {
+      // fallback: take body as is
+      planillaData = req.body;
+    }
+
+    const id = uuidv4();
+    const createdAt = new Date().toISOString();
+    const images = [];
+
+    if (req.files && req.files.length) {
+      for (const f of req.files) {
+        const publicUrl = `${DOMAIN}/uploads/${f.filename}`;
+        images.push({ filename: f.filename, url: publicUrl, originalname: f.originalname });
+      }
+    }
+
+    // Optionally store a copy of the planilla as a file (JSON) for download
+    const planillaFilename = `planilla_${Date.now()}_${id}.json`;
+    const planillaPath = path.join(PLANILLAS_DIR, planillaFilename);
+    fs.writeFileSync(planillaPath, JSON.stringify({ meta: planillaData, images }, null, 2), 'utf8');
+
+    const record = {
+      id,
+      filename: planillaFilename,
+      filePath: `/uploads/planillas/${planillaFilename}`,
+      createdAt,
+      updatedAt: createdAt,
+      syncStatus: 'pending', // pending|synced|error
+      remoteId: null,
+      images,
+      meta: planillaData
+    };
+
+    db.data.planillas.push(record);
+    await db.write();
+
+    return res.status(201).json({ ok: true, planilla: record });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Error del servidor', detalle: err.message });
+    console.error('Error POST /planillas:', err);
+    return res.status(500).json({ error: 'Error interno', detalle: err.message });
   }
 });
 
-// --- /mapa-static: descarga la imagen de Google *desde el servidor* y la guarda en /uploads
-// Se recomienda no exponer la API Key en el front; ponerla en .env
-const GOOGLE_KEY = process.env.GOOGLE_MAPS_KEY;
-if (!GOOGLE_KEY) {
-  console.warn('WARNING: GOOGLE_MAPS_KEY no definido en .env. /mapa-static no funcionará sin key.');
-}
+// --- List planillas
+app.get('/planillas', async (req, res) => {
+  await initDb();
+  return res.json({ planillas: db.data.planillas });
+});
 
-// fetch fallback (Node 18+ tiene global fetch; si no, usamos undici)
+// --- Get single planilla metadata (and link to file)
+app.get('/planillas/:id', async (req, res) => {
+  await initDb();
+  const rec = db.data.planillas.find(p => p.id === req.params.id);
+  if (!rec) return res.status(404).json({ error: 'No encontrada' });
+  return res.json({ planilla: rec });
+});
+
+// --- Mark as synced (client calls this after successful remote save)
+app.post('/planillas/:id/sync', async (req, res) => {
+  const { remoteId } = req.body || {};
+  await initDb();
+  const rec = db.data.planillas.find(p => p.id === req.params.id);
+  if (!rec) return res.status(404).json({ error: 'No encontrada' });
+  rec.syncStatus = 'synced';
+  rec.remoteId = remoteId || rec.remoteId || null;
+  rec.updatedAt = new Date().toISOString();
+  await db.write();
+  return res.json({ ok: true, planilla: rec });
+});
+
+// --- Delete planilla (metadata + stored JSON + optionally images)
+app.delete('/planillas/:id', async (req, res) => {
+  await initDb();
+  const idx = db.data.planillas.findIndex(p => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'No encontrada' });
+  const rec = db.data.planillas[idx];
+
+  // remove stored planilla file
+  try {
+    const fullPath = path.join(__dirname, rec.filePath);
+    if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+  } catch (e) {
+    console.warn('No pude borrar archivo planilla', e.message);
+  }
+
+  // Optionally delete uploaded images (uncomment if desired)
+  // for (const img of rec.images || []) {
+  //   const imgPath = path.join(__dirname, UPLOADS_DIR, img.filename);
+  //   if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+  // }
+
+  db.data.planillas.splice(idx, 1);
+  await db.write();
+  return res.json({ ok: true });
+});
+
+// --- Mapa estático (igual que tu versión)
+const GOOGLE_KEY = process.env.GOOGLE_MAPS_KEY;
 let fetchFn = globalThis.fetch;
 if (!fetchFn) {
   try {
-    // undici debe estar instalado en el servidor: npm i undici
     fetchFn = require('undici').fetch;
   } catch (e) {
     console.error('fetch no disponible. Instalá Node 18+ o "npm i undici" en el servidor.');
-    process.exit(1);
+    // no exit; /mapa-static will fail gracefully if key missing or fetch missing
   }
 }
 
@@ -93,41 +198,36 @@ app.get('/mapa-static', async (req, res) => {
   try {
     const { lat, lon, zoom = 16, size = '400x200' } = req.query;
     if (!lat || !lon) return res.status(400).json({ error: 'Parámetros lat y lon requeridos' });
-
     if (!GOOGLE_KEY) return res.status(500).json({ error: 'GOOGLE_MAPS_KEY no configurada en el servidor' });
 
-    // Sanitize / small validation
     const latN = Number(lat);
     const lonN = Number(lon);
     if (Number.isNaN(latN) || Number.isNaN(lonN)) return res.status(400).json({ error: 'lat o lon inválidos' });
 
     const url = `https://maps.googleapis.com/maps/api/staticmap?center=${latN},${lonN}&zoom=${zoom}&size=${size}&markers=color:red%7C${latN},${lonN}&key=${GOOGLE_KEY}`;
-
     const response = await fetchFn(url);
-    if (!response.ok) {
-      console.error('Google Static Maps respondió:', response.status, response.statusText);
-      return res.status(502).json({ error: 'Error al obtener la imagen desde Google Maps', status: response.status });
-    }
+    if (!response.ok) return res.status(502).json({ error: 'Error al obtener imagen', status: response.status });
 
     const buffer = Buffer.from(await response.arrayBuffer());
     const fileName = `mapa_${Date.now()}.png`;
     const filePath = path.join(__dirname, UPLOADS_DIR, fileName);
     fs.writeFileSync(filePath, buffer);
 
-    const publicUrl = `${DOMAIN.replace(/\/$/, '')}/uploads/${fileName}`;
+    const publicUrl = `${DOMAIN}/uploads/${fileName}`;
     return res.json({ imageUrl: publicUrl });
-
   } catch (err) {
-    console.error('Error en /mapa-static:', err);
+    console.error('Error /mapa-static:', err);
     return res.status(500).json({ error: 'Error interno', detalle: err.message });
   }
 });
 
-// test
-app.get('/', (req, res) => res.send('Servidor de subidas funcionando...'));
+// root test
+app.get('/', (req, res) => res.send('Servidor de subidas + planillas funcionando...'));
 
-// arrancar servidor
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor escuchando en http://0.0.0.0:${PORT}`);
-});
-
+// start server
+(async function start() {
+  await initDb();
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor escuchando en http://0.0.0.0:${PORT}`);
+  });
+})();

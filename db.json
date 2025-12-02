@@ -1,0 +1,18 @@
+{
+  "planillas": [
+    {
+      "id": "4e2652cb-abcf-4639-8960-603ae4e8f5c7",
+      "filename": "planilla_1764691954406_4e2652cb-abcf-4639-8960-603ae4e8f5c7.json",
+      "filePath": "/uploads/planillas/planilla_1764691954406_4e2652cb-abcf-4639-8960-603ae4e8f5c7.json",
+      "createdAt": "2025-12-02T16:12:34.406Z",
+      "updatedAt": "2025-12-02T16:20:26.980Z",
+      "syncStatus": "synced",
+      "remoteId": "miRemote123",
+      "images": [],
+      "meta": {
+        "fecha": "2025-12-02",
+        "cliente": "ACME"
+      }
+    }
+  ]
+}
