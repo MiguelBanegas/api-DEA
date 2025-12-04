@@ -8,6 +8,15 @@ const fs = require('fs');
 const { Low } = require('lowdb');
 const { JSONFile } = require('lowdb/node');
 const { v4: uuidv4 } = require('uuid');
+const admin = require('firebase-admin');
+
+// --- FIREBASE ADMIN SETUP ---
+const serviceAccount = require('./serviceAccountKey.json');
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+const firestore = admin.firestore();
+// --------------------------
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +45,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 const whitelist = [
   'http://127.0.0.1:5500',
+  'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:3001',
   'http://dea.mabcontrol.ar',
@@ -73,7 +83,7 @@ app.post('/upload', upload.single('image'), (req, res) => {
 // or multipart/form-data with field `planilla` (JSON string) and `images[]` files
 app.post('/planillas', upload.array('images'), async (req, res) => {
   try {
-    await initDb();
+    // await initDb(); // <- ELIMINADO
     let planillaData = null;
 
     if (req.is('application/json') || req.body.data) {
@@ -122,6 +132,21 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
     db.data.planillas.push(record);
     await db.write();
 
+    // --- GUARDAR EN FIRESTORE ---
+    try {
+      console.log('Guardando en Firestore...');
+      const firestoreRef = await firestore.collection('planillas').add(record);
+      console.log('Documento guardado en Firestore con ID: ', firestoreRef.id);
+      // Opcional: actualizar el registro local con el ID de firestore
+      record.remoteId = firestoreRef.id;
+      record.syncStatus = 'synced';
+      await db.write();
+    } catch (firestoreError) {
+      console.error("Error guardando en Firestore:", firestoreError);
+      // La planilla ya está en lowdb, se puede re-intentar la sincronización después
+    }
+    // ----------------------------
+
     return res.status(201).json({ ok: true, planilla: record });
   } catch (err) {
     console.error('Error POST /planillas:', err);
@@ -131,13 +156,13 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
 
 // --- List planillas
 app.get('/planillas', async (req, res) => {
-  await initDb();
+  // await initDb(); // <- ELIMINADO
   return res.json({ planillas: db.data.planillas });
 });
 
 // --- Get single planilla metadata (and link to file)
 app.get('/planillas/:id', async (req, res) => {
-  await initDb();
+  // await initDb(); // <- ELIMINADO
   const rec = db.data.planillas.find(p => p.id === req.params.id);
   if (!rec) return res.status(404).json({ error: 'No encontrada' });
   return res.json({ planilla: rec });
@@ -146,7 +171,7 @@ app.get('/planillas/:id', async (req, res) => {
 // --- Mark as synced (client calls this after successful remote save)
 app.post('/planillas/:id/sync', async (req, res) => {
   const { remoteId } = req.body || {};
-  await initDb();
+  // await initDb(); // <- ELIMINADO
   const rec = db.data.planillas.find(p => p.id === req.params.id);
   if (!rec) return res.status(404).json({ error: 'No encontrada' });
   rec.syncStatus = 'synced';
@@ -158,7 +183,7 @@ app.post('/planillas/:id/sync', async (req, res) => {
 
 // --- Delete planilla (metadata + stored JSON + optionally images)
 app.delete('/planillas/:id', async (req, res) => {
-  await initDb();
+  // await initDb(); // <- ELIMINADO
   const idx = db.data.planillas.findIndex(p => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'No encontrada' });
   const rec = db.data.planillas[idx];
