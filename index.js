@@ -1,79 +1,91 @@
 // index.js - servidor para uploads + planillas (Express + multer + lowdb)
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const { Low } = require('lowdb');
-const { JSONFile } = require('lowdb/node');
-const { v4: uuidv4 } = require('uuid');
-const admin = require('firebase-admin');
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { Low } from "lowdb";
+import { JSONFile } from "lowdb/node";
+import { v4 as uuidv4 } from "uuid";
+import admin from "firebase-admin";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+// ESM __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // --- FIREBASE ADMIN SETUP ---
-const serviceAccount = require('./serviceAccountKey.json');
+const serviceAccount = JSON.parse(
+  fs.readFileSync(new URL("./serviceAccountKey.json", import.meta.url), "utf-8")
+);
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 const firestore = admin.firestore();
 // --------------------------
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const DOMAIN = (process.env.DOMAIN || `http://localhost:${PORT}`).replace(/\/$/, '');
-const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads';
-const PLANILLAS_DIR = path.join(UPLOADS_DIR, 'planillas');
+const DOMAIN = (process.env.DOMAIN || `http://localhost:${PORT}`).replace(
+  /\/$/,
+  ""
+);
+const UPLOADS_DIR = process.env.UPLOADS_DIR || "uploads";
+const PLANILLAS_DIR = path.join(UPLOADS_DIR, "planillas");
 
 // ensure directories exist
-[UPLOADS_DIR, PLANILLAS_DIR].forEach(dir => {
+[UPLOADS_DIR, PLANILLAS_DIR].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
 // lowdb setup for simple metadata storage
-const dbFile = process.env.DB_FILE || 'db.json';
+const dbFile = process.env.DB_FILE || "db.json";
 const adapter = new JSONFile(dbFile);
-const db = new Low(adapter);
+const defaultData = { planillas: [] };
+const db = new Low(adapter, defaultData);
 
 async function initDb() {
   await db.read();
-  db.data = db.data || { planillas: [] };
   await db.write();
 }
 
 // middlewares
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 const whitelist = [
-  'http://127.0.0.1:5500',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://dea.mabcontrol.ar',
-  'https://dea.mabcontrol.ar',
-  'https://www.dea.mabcontrol.ar'
+  "http://127.0.0.1:5500",
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://dea.mabcontrol.ar",
+  "https://dea.mabcontrol.ar",
+  "https://www.dea.mabcontrol.ar",
 ];
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin || whitelist.includes(origin)) callback(null, true);
-    else callback(new Error('No autorizado por CORS'));
-  }
+    else callback(new Error("No autorizado por CORS"));
+  },
 };
 app.use(cors(corsOptions));
-app.use('/uploads', express.static(path.join(__dirname, UPLOADS_DIR)));
+app.use("/uploads", express.static(path.join(__dirname, UPLOADS_DIR)));
 
 // multer storage (files go to uploads/)
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOADS_DIR + '/'),
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR + "/"),
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
+  },
 });
 const upload = multer({ storage });
 
 // --- Image upload endpoint (compatible con tu front)
-app.post('/upload', upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo.' });
+app.post("/upload", upload.single("image"), (req, res) => {
+  if (!req.file)
+    return res.status(400).json({ error: "No se subió ningún archivo." });
   const fileUrl = `${DOMAIN}/uploads/${req.file.filename}`;
   return res.json({ imageUrl: fileUrl, filename: req.file.filename });
 });
@@ -81,12 +93,12 @@ app.post('/upload', upload.single('image'), (req, res) => {
 // --- Create planilla
 // Accepts either application/json with body { data: {...}, images: [...] }
 // or multipart/form-data with field `planilla` (JSON string) and `images[]` files
-app.post('/planillas', upload.array('images'), async (req, res) => {
+app.post("/planillas", upload.array("images"), async (req, res) => {
   try {
     // await initDb(); // <- ELIMINADO
     let planillaData = null;
 
-    if (req.is('application/json') || req.body.data) {
+    if (req.is("application/json") || req.body.data) {
       // JSON body: { data: {...}, images: [url,...] }
       planillaData = req.body.data || req.body;
     } else if (req.body.planilla) {
@@ -94,7 +106,9 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
       try {
         planillaData = JSON.parse(req.body.planilla);
       } catch (e) {
-        return res.status(400).json({ error: 'Campo planilla no es JSON válido' });
+        return res
+          .status(400)
+          .json({ error: "Campo planilla no es JSON válido" });
       }
     } else {
       // fallback: take body as is
@@ -108,14 +122,22 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
     if (req.files && req.files.length) {
       for (const f of req.files) {
         const publicUrl = `${DOMAIN}/uploads/${f.filename}`;
-        images.push({ filename: f.filename, url: publicUrl, originalname: f.originalname });
+        images.push({
+          filename: f.filename,
+          url: publicUrl,
+          originalname: f.originalname,
+        });
       }
     }
 
     // Optionally store a copy of the planilla as a file (JSON) for download
     const planillaFilename = `planilla_${Date.now()}_${id}.json`;
     const planillaPath = path.join(PLANILLAS_DIR, planillaFilename);
-    fs.writeFileSync(planillaPath, JSON.stringify({ meta: planillaData, images }, null, 2), 'utf8');
+    fs.writeFileSync(
+      planillaPath,
+      JSON.stringify({ meta: planillaData, images }, null, 2),
+      "utf8"
+    );
 
     const record = {
       id,
@@ -123,10 +145,10 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
       filePath: `/uploads/planillas/${planillaFilename}`,
       createdAt,
       updatedAt: createdAt,
-      syncStatus: 'pending', // pending|synced|error
+      syncStatus: "pending", // pending|synced|error
       remoteId: null,
       images,
-      meta: planillaData
+      meta: planillaData,
     };
 
     db.data.planillas.push(record);
@@ -134,12 +156,12 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
 
     // --- GUARDAR EN FIRESTORE ---
     try {
-      console.log('Guardando en Firestore...');
-      const firestoreRef = await firestore.collection('planillas').add(record);
-      console.log('Documento guardado en Firestore con ID: ', firestoreRef.id);
+      console.log("Guardando en Firestore...");
+      const firestoreRef = await firestore.collection("planillas").add(record);
+      console.log("Documento guardado en Firestore con ID: ", firestoreRef.id);
       // Opcional: actualizar el registro local con el ID de firestore
       record.remoteId = firestoreRef.id;
-      record.syncStatus = 'synced';
+      record.syncStatus = "synced";
       await db.write();
     } catch (firestoreError) {
       console.error("Error guardando en Firestore:", firestoreError);
@@ -149,32 +171,34 @@ app.post('/planillas', upload.array('images'), async (req, res) => {
 
     return res.status(201).json({ ok: true, planilla: record });
   } catch (err) {
-    console.error('Error POST /planillas:', err);
-    return res.status(500).json({ error: 'Error interno', detalle: err.message });
+    console.error("Error POST /planillas:", err);
+    return res
+      .status(500)
+      .json({ error: "Error interno", detalle: err.message });
   }
 });
 
 // --- List planillas
-app.get('/planillas', async (req, res) => {
+app.get("/planillas", async (req, res) => {
   // await initDb(); // <- ELIMINADO
   return res.json({ planillas: db.data.planillas });
 });
 
 // --- Get single planilla metadata (and link to file)
-app.get('/planillas/:id', async (req, res) => {
+app.get("/planillas/:id", async (req, res) => {
   // await initDb(); // <- ELIMINADO
-  const rec = db.data.planillas.find(p => p.id === req.params.id);
-  if (!rec) return res.status(404).json({ error: 'No encontrada' });
+  const rec = db.data.planillas.find((p) => p.id === req.params.id);
+  if (!rec) return res.status(404).json({ error: "No encontrada" });
   return res.json({ planilla: rec });
 });
 
 // --- Mark as synced (client calls this after successful remote save)
-app.post('/planillas/:id/sync', async (req, res) => {
+app.post("/planillas/:id/sync", async (req, res) => {
   const { remoteId } = req.body || {};
   // await initDb(); // <- ELIMINADO
-  const rec = db.data.planillas.find(p => p.id === req.params.id);
-  if (!rec) return res.status(404).json({ error: 'No encontrada' });
-  rec.syncStatus = 'synced';
+  const rec = db.data.planillas.find((p) => p.id === req.params.id);
+  if (!rec) return res.status(404).json({ error: "No encontrada" });
+  rec.syncStatus = "synced";
   rec.remoteId = remoteId || rec.remoteId || null;
   rec.updatedAt = new Date().toISOString();
   await db.write();
@@ -182,10 +206,10 @@ app.post('/planillas/:id/sync', async (req, res) => {
 });
 
 // --- Delete planilla (metadata + stored JSON + optionally images)
-app.delete('/planillas/:id', async (req, res) => {
+app.delete("/planillas/:id", async (req, res) => {
   // await initDb(); // <- ELIMINADO
-  const idx = db.data.planillas.findIndex(p => p.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'No encontrada' });
+  const idx = db.data.planillas.findIndex((p) => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrada" });
   const rec = db.data.planillas[idx];
 
   // remove stored planilla file
@@ -193,7 +217,7 @@ app.delete('/planillas/:id', async (req, res) => {
     const fullPath = path.join(__dirname, rec.filePath);
     if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
   } catch (e) {
-    console.warn('No pude borrar archivo planilla', e.message);
+    console.warn("No pude borrar archivo planilla", e.message);
   }
 
   // Optionally delete uploaded images (uncomment if desired)
@@ -209,29 +233,28 @@ app.delete('/planillas/:id', async (req, res) => {
 
 // --- Mapa estático (igual que tu versión)
 const GOOGLE_KEY = process.env.GOOGLE_MAPS_KEY;
-let fetchFn = globalThis.fetch;
-if (!fetchFn) {
-  try {
-    fetchFn = require('undici').fetch;
-  } catch (e) {
-    console.error('fetch no disponible. Instalá Node 18+ o "npm i undici" en el servidor.');
-    // no exit; /mapa-static will fail gracefully if key missing or fetch missing
-  }
-}
 
-app.get('/mapa-static', async (req, res) => {
+app.get("/mapa-static", async (req, res) => {
   try {
-    const { lat, lon, zoom = 16, size = '400x200' } = req.query;
-    if (!lat || !lon) return res.status(400).json({ error: 'Parámetros lat y lon requeridos' });
-    if (!GOOGLE_KEY) return res.status(500).json({ error: 'GOOGLE_MAPS_KEY no configurada en el servidor' });
+    const { lat, lon, zoom = 16, size = "400x200" } = req.query;
+    if (!lat || !lon)
+      return res.status(400).json({ error: "Parámetros lat y lon requeridos" });
+    if (!GOOGLE_KEY)
+      return res
+        .status(500)
+        .json({ error: "GOOGLE_MAPS_KEY no configurada en el servidor" });
 
     const latN = Number(lat);
     const lonN = Number(lon);
-    if (Number.isNaN(latN) || Number.isNaN(lonN)) return res.status(400).json({ error: 'lat o lon inválidos' });
+    if (Number.isNaN(latN) || Number.isNaN(lonN))
+      return res.status(400).json({ error: "lat o lon inválidos" });
 
     const url = `https://maps.googleapis.com/maps/api/staticmap?center=${latN},${lonN}&zoom=${zoom}&size=${size}&markers=color:red%7C${latN},${lonN}&key=${GOOGLE_KEY}`;
-    const response = await fetchFn(url);
-    if (!response.ok) return res.status(502).json({ error: 'Error al obtener imagen', status: response.status });
+    const response = await (globalThis.appFetchFn || globalThis.fetch)(url);
+    if (!response.ok)
+      return res
+        .status(502)
+        .json({ error: "Error al obtener imagen", status: response.status });
 
     const buffer = Buffer.from(await response.arrayBuffer());
     const fileName = `mapa_${Date.now()}.png`;
@@ -241,18 +264,39 @@ app.get('/mapa-static', async (req, res) => {
     const publicUrl = `${DOMAIN}/uploads/${fileName}`;
     return res.json({ imageUrl: publicUrl });
   } catch (err) {
-    console.error('Error /mapa-static:', err);
-    return res.status(500).json({ error: 'Error interno', detalle: err.message });
+    console.error("Error /mapa-static:", err);
+    return res
+      .status(500)
+      .json({ error: "Error interno", detalle: err.message });
   }
 });
 
 // root test
-app.get('/', (req, res) => res.send('Servidor de subidas + planillas funcionando...'));
+app.get("/", (req, res) =>
+  res.send("Servidor de subidas + planillas funcionando...")
+);
 
 // start server
 (async function start() {
   await initDb();
-  app.listen(PORT, '0.0.0.0', () => {
+
+  // Initialize fetch if needed
+  let fetchFn = globalThis.fetch;
+  if (!fetchFn) {
+    try {
+      const undici = await import("undici");
+      fetchFn = undici.fetch;
+    } catch (e) {
+      console.error(
+        'fetch no disponible. Instalá Node 18+ o "npm i undici" en el servidor.'
+      );
+    }
+  }
+
+  // Store fetchFn globally for use in /mapa-static route
+  globalThis.appFetchFn = fetchFn;
+
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor escuchando en http://0.0.0.0:${PORT}`);
   });
 })();

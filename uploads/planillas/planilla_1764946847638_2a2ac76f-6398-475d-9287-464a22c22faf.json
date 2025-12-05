@@ -22,17 +22,17 @@
     "cumpleIec": "si",
     "certificadoFabricante": "si",
     "condicionesUso": "si",
-    "fechaMedicion": "2025-12-04",
-    "horaInicio": "17:19",
-    "horaFin": "21:19",
-    "metodologia": "ninguna",
-    "observaciones": "ninguna",
+    "fechaMedicion": "2025-12-05",
+    "horaInicio": "19:00",
+    "horaFin": "19:00",
+    "metodologia": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+    "observaciones": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
     "certificadoCalibracion": "si",
     "planoCroquis": "si",
     "tipo": "puesta-tierra",
     "latitud": null,
     "longitud": null,
-    "fechaCreacion": "2025-12-04T20:26:11.238Z"
+    "fechaCreacion": "2025-12-05T15:00:47.243Z"
   },
   "images": []
 }
