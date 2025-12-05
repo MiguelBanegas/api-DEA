@@ -71,6 +71,11 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.use("/uploads", express.static(path.join(__dirname, UPLOADS_DIR)));
+// Manejo de errores
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: "Error interno del servidor" });
+});
 
 // multer storage (files go to uploads/)
 const storage = multer.diskStorage({
@@ -80,7 +85,16 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   },
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const allowed = ["image/png", "image/jpeg", "image/webp"];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error("Tipo de archivo no permitido"), false);
+    }
+    cb(null, true);
+  },
+});
 
 // --- Image upload endpoint (compatible con tu front)
 app.post("/upload", upload.single("image"), (req, res) => {
@@ -176,6 +190,9 @@ app.post("/planillas", upload.array("images"), async (req, res) => {
       .status(500)
       .json({ error: "Error interno", detalle: err.message });
   }
+});
+app.get("/health", (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
 });
 
 // --- List planillas
