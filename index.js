@@ -307,7 +307,7 @@ app.put("/planillas/:id", upload.array("images"), async (req, res) => {
       return res.status(400).json({ error: "Campo planilla es requerido" });
     }
 
-    // 1. Find existing record
+    // 1. Find existing record img
     const rec = db.data.planillas.find((p) => p.id === id);
     if (!rec) return res.status(404).json({ error: "Planilla no encontrada" });
 
