@@ -224,28 +224,49 @@ app.post("/planillas/:id/sync", async (req, res) => {
 
 // --- Delete planilla (metadata + stored JSON + optionally images)
 app.delete("/planillas/:id", async (req, res) => {
-  // await initDb(); // <- ELIMINADO
-  const idx = db.data.planillas.findIndex((p) => p.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: "No encontrada" });
-  const rec = db.data.planillas[idx];
-
-  // remove stored planilla file
   try {
-    const fullPath = path.join(__dirname, rec.filePath);
-    if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-  } catch (e) {
-    console.warn("No pude borrar archivo planilla", e.message);
+    const idx = db.data.planillas.findIndex((p) => p.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "No encontrada" });
+    const rec = db.data.planillas[idx];
+
+    // remove stored planilla file
+    try {
+      const fullPath = path.join(__dirname, rec.filePath);
+      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+    } catch (e) {
+      console.warn("No pude borrar archivo planilla", e.message);
+    }
+
+    // Optionally delete uploaded images (uncomment if desired)
+    // for (const img of rec.images || []) {
+    //   const imgPath = path.join(__dirname, UPLOADS_DIR, img.filename);
+    //   if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+    // }
+
+    // Remove from lowdb
+    db.data.planillas.splice(idx, 1);
+    await db.write();
+
+    // --- DELETE FROM FIRESTORE ---
+    if (rec.remoteId) {
+      try {
+        console.log("Eliminando de Firestore...");
+        await firestore.collection("planillas").doc(rec.remoteId).delete();
+        console.log("Documento eliminado de Firestore con ID:", rec.remoteId);
+      } catch (firestoreError) {
+        console.error("Error eliminando de Firestore:", firestoreError);
+        // Continue anyway - the local DB was already updated
+      }
+    }
+    // ----------------------------
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("Error DELETE /planillas/:id:", err);
+    return res
+      .status(500)
+      .json({ error: "Error interno", detalle: err.message });
   }
-
-  // Optionally delete uploaded images (uncomment if desired)
-  // for (const img of rec.images || []) {
-  //   const imgPath = path.join(__dirname, UPLOADS_DIR, img.filename);
-  //   if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-  // }
-
-  db.data.planillas.splice(idx, 1);
-  await db.write();
-  return res.json({ ok: true });
 });
 // --- Update planilla (actualiza un registro)
 app.put("/planillas/:id", upload.array("images"), async (req, res) => {
