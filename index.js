@@ -238,15 +238,28 @@ app.delete("/planillas/:id", async (req, res) => {
     }
 
     // Delete uploaded images associated with this planilla
+    console.log(
+      `Intentando borrar ${
+        rec.images ? rec.images.length : 0
+      } imágenes asociadas...`
+    );
     for (const img of rec.images || []) {
       try {
+        if (!img.filename) {
+          console.warn("Imagen sin filename, saltando:", img);
+          continue;
+        }
         const imgPath = path.join(__dirname, UPLOADS_DIR, img.filename);
+        console.log(`Buscando imagen en: ${imgPath}`);
+
         if (fs.existsSync(imgPath)) {
           fs.unlinkSync(imgPath);
-          console.log(`Imagen eliminada: ${img.filename}`);
+          console.log(`✅ Imagen eliminada: ${img.filename}`);
+        } else {
+          console.log(`⚠️ Imagen no encontrada en disco: ${imgPath}`);
         }
       } catch (e) {
-        console.warn(`No pude borrar imagen ${img.filename}:`, e.message);
+        console.warn(`❌ No pude borrar imagen ${img.filename}:`, e.message);
       }
     }
 

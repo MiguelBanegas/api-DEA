@@ -1,0 +1,56 @@
+{
+  "planillas": [
+    {
+      "id": "7dcb652b-c6a6-4913-b1b6-21c703f7b2bf",
+      "filename": "planilla_1765043846572_7dcb652b-c6a6-4913-b1b6-21c703f7b2bf.json",
+      "filePath": "/uploads/planillas/planilla_1765043846572_7dcb652b-c6a6-4913-b1b6-21c703f7b2bf.json",
+      "createdAt": "2025-12-06T17:57:26.572Z",
+      "updatedAt": "2025-12-06T17:57:26.572Z",
+      "syncStatus": "synced",
+      "remoteId": "FriStlQzXTkY1LFQiJ4Z",
+      "images": [
+        {
+          "filename": "1765043846571-361555619",
+          "url": "https://dea.mabcontrol.ar/uploads/1765043846571-361555619",
+          "originalname": "blob"
+        }
+      ],
+      "meta": {
+        "razonSocial": "juan mauceri solo",
+        "cuit": "20-34567854-5",
+        "direccion": "calle  1 n 456",
+        "localidad": "tucuman",
+        "cp": "1234",
+        "provincia": "Santa Fe",
+        "nombreProfesional": "diego",
+        "apellidoProfesional": "dea",
+        "matriculaProfesional": "1",
+        "incumbenciasEspecificas": "Técnico eléctrico",
+        "documentacionIncumbencias": "si",
+        "rangoKv": "13.2",
+        "pagoMatricula": "si",
+        "seguroAccidentes": "si",
+        "pagoSeguro": "si",
+        "marcaInstrumento": "metrel",
+        "modeloInstrumento": "12",
+        "numeroSerieInstrumento": "-",
+        "tipoInstrumento": "MFT",
+        "cumpleIec": "si",
+        "certificadoFabricante": "si",
+        "condicionesUso": "si",
+        "fechaMedicion": "2025-12-06",
+        "horaInicio": "14:52",
+        "horaFin": "15:52",
+        "metodologia": "-----nada---",
+        "observaciones": "------nadda----",
+        "certificadoCalibracion": "si",
+        "planoCroquis": "si",
+        "tipo": "puesta-tierra",
+        "latitud": null,
+        "longitud": null,
+        "fechaCreacion": "2025-12-06T17:57:24.423Z",
+        "images": []
+      }
+    }
+  ]
+}
