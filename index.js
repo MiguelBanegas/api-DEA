@@ -247,47 +247,92 @@ app.delete("/planillas/:id", async (req, res) => {
   await db.write();
   return res.json({ ok: true });
 });
-//actualiza un registro
+// --- Update planilla (actualiza un registro)
 app.put("/planillas/:id", upload.array("images"), async (req, res) => {
-  const id = req.params.id;
-  const metaNueva = JSON.parse(req.body.planilla);
-  const nuevasImagenesFiles = req.files; // Array de archivos subidos
+  try {
+    const id = req.params.id;
 
-  // 1. Obtener informe actual de la BD
-  const informeActual = await db.get(id);
-  if (!informeActual) return res.status(404).send("No encontrado");
+    // Parse planilla data from form
+    let planillaData = null;
+    if (req.body.planilla) {
+      try {
+        planillaData = JSON.parse(req.body.planilla);
+      } catch (e) {
+        return res
+          .status(400)
+          .json({ error: "Campo planilla no es JSON válido" });
+      }
+    } else {
+      return res.status(400).json({ error: "Campo planilla es requerido" });
+    }
 
-  // 2. Procesar imágenes
-  // - Las que vienen en metaNueva.images son las URLs viejas que el usuario mantuvo.
-  // - Las nuevas hay que subirlas y obtener URLs.
-  const urlsNuevas = await subirArchivos(nuevasImagenesFiles);
+    // 1. Find existing record
+    const rec = db.data.planillas.find((p) => p.id === id);
+    if (!rec) return res.status(404).json({ error: "Planilla no encontrada" });
 
-  // 3. Combinar
-  // Es posible que el frontend ya te mande en metaNueva.images SOLO las que quiere conservar.
-  // Así que la lista final sería: metaNueva.images + urlsNuevas.
-  const listaFinalImagenes = [...(metaNueva.images || []), ...urlsNuevas];
+    // 2. Process new uploaded images
+    const newImages = [];
+    if (req.files && req.files.length) {
+      for (const f of req.files) {
+        const publicUrl = `${DOMAIN}/uploads/${f.filename}`;
+        newImages.push({
+          filename: f.filename,
+          url: publicUrl,
+          originalname: f.originalname,
+        });
+      }
+    }
 
-  // 4. Actualizar en BD
-  // Actualizar el registro con el nuevo meta y la nueva lista de imágenes.
-  metaNueva.images = listaFinalImagenes; // Asegurar que el meta tenga la lista completa
+    // 3. Combine images: keep existing ones from planillaData + add new uploads
+    const listaFinalImagenes = [...(planillaData.images || []), ...newImages];
 
-  /* 
-       IMPORTANTE: Si tu backend guarda las imágenes en una columna separada 'images' 
-       además de en el JSON 'meta', asegúrate de actualizar AMBOS lugares.
-       En el frontend estamos consumiendo 'planilla.images' O 'planilla.meta.images'.
-    */
+    // 4. Update the planilla JSON file
+    const planillaFilename = `planilla_${Date.now()}_${id}.json`;
+    const planillaPath = path.join(PLANILLAS_DIR, planillaFilename);
+    fs.writeFileSync(
+      planillaPath,
+      JSON.stringify(
+        { meta: planillaData, images: listaFinalImagenes },
+        null,
+        2
+      ),
+      "utf8"
+    );
 
-  const actualizado = await db.update(id, {
-    meta: metaNueva,
-    images: listaFinalImagenes, // Si lo usas separado
-    updatedAt: new Date(),
-    // NO cambiar createdAt
-  });
+    // 5. Update record in lowdb
+    rec.filename = planillaFilename;
+    rec.filePath = `/uploads/planillas/${planillaFilename}`;
+    rec.updatedAt = new Date().toISOString();
+    rec.images = listaFinalImagenes;
+    rec.meta = planillaData;
 
-  // 5. Responder
-  // Deberías devolver el objeto actualizado, idealmente con la estructura:
-  // { planilla: { id: "...", ...meta, images: [...] } }
-  res.json({ planilla: actualizado });
+    await db.write();
+
+    // 6. Update in Firestore if remoteId exists
+    if (rec.remoteId) {
+      try {
+        console.log("Actualizando en Firestore...");
+        await firestore.collection("planillas").doc(rec.remoteId).update({
+          filename: rec.filename,
+          filePath: rec.filePath,
+          updatedAt: rec.updatedAt,
+          images: listaFinalImagenes,
+          meta: planillaData,
+        });
+        console.log("Documento actualizado en Firestore con ID:", rec.remoteId);
+      } catch (firestoreError) {
+        console.error("Error actualizando en Firestore:", firestoreError);
+        // Continue anyway - the local DB was updated
+      }
+    }
+
+    return res.json({ ok: true, planilla: rec });
+  } catch (err) {
+    console.error("Error PUT /planillas/:id:", err);
+    return res
+      .status(500)
+      .json({ error: "Error interno", detalle: err.message });
+  }
 });
 // --- Mapa estático (igual que tu versión)
 const GOOGLE_KEY = process.env.GOOGLE_MAPS_KEY;
