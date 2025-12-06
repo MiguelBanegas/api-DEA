@@ -237,11 +237,18 @@ app.delete("/planillas/:id", async (req, res) => {
       console.warn("No pude borrar archivo planilla", e.message);
     }
 
-    // Optionally delete uploaded images (uncomment if desired)
-    // for (const img of rec.images || []) {
-    //   const imgPath = path.join(__dirname, UPLOADS_DIR, img.filename);
-    //   if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-    // }
+    // Delete uploaded images associated with this planilla
+    for (const img of rec.images || []) {
+      try {
+        const imgPath = path.join(__dirname, UPLOADS_DIR, img.filename);
+        if (fs.existsSync(imgPath)) {
+          fs.unlinkSync(imgPath);
+          console.log(`Imagen eliminada: ${img.filename}`);
+        }
+      } catch (e) {
+        console.warn(`No pude borrar imagen ${img.filename}:`, e.message);
+      }
+    }
 
     // Remove from lowdb
     db.data.planillas.splice(idx, 1);
