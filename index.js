@@ -247,7 +247,48 @@ app.delete("/planillas/:id", async (req, res) => {
   await db.write();
   return res.json({ ok: true });
 });
+//actualiza un registro
+app.put("/planillas/:id", upload.array("images"), async (req, res) => {
+  const id = req.params.id;
+  const metaNueva = JSON.parse(req.body.planilla);
+  const nuevasImagenesFiles = req.files; // Array de archivos subidos
 
+  // 1. Obtener informe actual de la BD
+  const informeActual = await db.get(id);
+  if (!informeActual) return res.status(404).send("No encontrado");
+
+  // 2. Procesar imágenes
+  // - Las que vienen en metaNueva.images son las URLs viejas que el usuario mantuvo.
+  // - Las nuevas hay que subirlas y obtener URLs.
+  const urlsNuevas = await subirArchivos(nuevasImagenesFiles);
+
+  // 3. Combinar
+  // Es posible que el frontend ya te mande en metaNueva.images SOLO las que quiere conservar.
+  // Así que la lista final sería: metaNueva.images + urlsNuevas.
+  const listaFinalImagenes = [...(metaNueva.images || []), ...urlsNuevas];
+
+  // 4. Actualizar en BD
+  // Actualizar el registro con el nuevo meta y la nueva lista de imágenes.
+  metaNueva.images = listaFinalImagenes; // Asegurar que el meta tenga la lista completa
+
+  /* 
+       IMPORTANTE: Si tu backend guarda las imágenes en una columna separada 'images' 
+       además de en el JSON 'meta', asegúrate de actualizar AMBOS lugares.
+       En el frontend estamos consumiendo 'planilla.images' O 'planilla.meta.images'.
+    */
+
+  const actualizado = await db.update(id, {
+    meta: metaNueva,
+    images: listaFinalImagenes, // Si lo usas separado
+    updatedAt: new Date(),
+    // NO cambiar createdAt
+  });
+
+  // 5. Responder
+  // Deberías devolver el objeto actualizado, idealmente con la estructura:
+  // { planilla: { id: "...", ...meta, images: [...] } }
+  res.json({ planilla: actualizado });
+});
 // --- Mapa estático (igual que tu versión)
 const GOOGLE_KEY = process.env.GOOGLE_MAPS_KEY;
 
