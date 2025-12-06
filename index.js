@@ -314,6 +314,16 @@ app.put("/planillas/:id", upload.array("images"), async (req, res) => {
     // 3. Combine images: keep existing ones from planillaData + add new uploads
     const listaFinalImagenes = [...(planillaData.images || []), ...newImages];
 
+    // DELETE OLD JSON FILE if exists
+    if (rec.filename) {
+      try {
+        const oldPath = path.join(PLANILLAS_DIR, rec.filename);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      } catch (e) {
+        console.warn("No pude borrar planilla anterior", e.message);
+      }
+    }
+
     // 4. Update the planilla JSON file
     const planillaFilename = `planilla_${Date.now()}_${id}.json`;
     const planillaPath = path.join(PLANILLAS_DIR, planillaFilename);
