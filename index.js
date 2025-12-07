@@ -104,6 +104,33 @@ app.post("/upload", upload.single("image"), (req, res) => {
   return res.json({ imageUrl: fileUrl, filename: req.file.filename });
 });
 
+// --- Delete single image endpoint
+app.delete("/uploads/:filename", (req, res) => {
+  const { filename } = req.params;
+  // Security check: prevent directory traversal
+  if (
+    filename.includes("..") ||
+    filename.includes("/") ||
+    filename.includes("\\")
+  ) {
+    return res.status(400).json({ error: "Nombre de archivo inválido" });
+  }
+
+  const filePath = path.join(__dirname, UPLOADS_DIR, filename);
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`Imagen eliminada manualmente: ${filename}`);
+      return res.json({ ok: true });
+    } else {
+      return res.status(404).json({ error: "Archivo no encontrado" });
+    }
+  } catch (err) {
+    console.error(`Error borrando ${filename}:`, err);
+    return res.status(500).json({ error: "Error al eliminar archivo" });
+  }
+});
+
 // --- Create planilla
 // Accepts either application/json with body { data: {...}, images: [...] }
 // or multipart/form-data with field `planilla` (JSON string) and `images[]` files
