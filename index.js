@@ -43,11 +43,12 @@ const PLANILLAS_DIR = path.join(UPLOADS_DIR, "planillas");
 // lowdb setup for simple metadata storage
 const dbFile = process.env.DB_FILE || "db.json";
 const adapter = new JSONFile(dbFile);
-const defaultData = { planillas: [] };
+const defaultData = { planillas: [], users: [] };
 const db = new Low(adapter, defaultData);
 
 async function initDb() {
   await db.read();
+  db.data.users = db.data.users || [];
   await db.write();
 }
 
@@ -71,6 +72,164 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.use("/uploads", express.static(path.join(__dirname, UPLOADS_DIR)));
+
+// --- AUTH MIDDLEWARE & HELPERS ---
+const authMiddleware =
+  (roles = []) =>
+  async (req, res, next) => {
+    const idToken = req.headers.authorization?.split("Bearer ")[1];
+    if (!idToken) {
+      return res.status(401).json({ error: "No autorizado: Token no provisto" });
+    }
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      req.user = decodedToken;
+      if (roles.length > 0 && !roles.some((role) => req.user.role === role)) {
+        return res.status(403).json({ error: "No autorizado: Rol insuficiente" });
+      }
+      next();
+    } catch (error) {
+      console.error("Error de autenticación:", error);
+      return res.status(401).json({ error: "No autorizado: Token inválido" });
+    }
+  };
+
+async function setUserRole(uid, role) {
+  try {
+    await admin.auth().setCustomUserClaims(uid, { role });
+    console.log(`Rol '${role}' asignado al usuario ${uid}`);
+  } catch (error) {
+    console.error(`Error asignando rol a ${uid}:`, error);
+    throw new Error("Error al asignar rol");
+  }
+}
+// ---------------------------------
+
+// --- USER CRUD ROUTES ---
+
+// ##########################################################################
+// #  ADVERTENCIA DE SEGURIDAD: RUTAS DE USUARIO ABIERTAS                    #
+// #  Las siguientes rutas CRUD para usuarios están desprotegidas           #
+// #  temporalmente para facilitar la configuración inicial. CUALQUIERA     #
+// #  puede crear, ver, editar y eliminar usuarios (incluyendo admins).     #
+// #  ES CRÍTICO volver a agregar el `authMiddleware` a estas rutas         #
+// #  antes de pasar a producción.                                          #
+// ##########################################################################
+
+// Create User (TEMPORARILY PUBLIC)
+app.post("/users", async (req, res) => {
+  const { email, password, displayName, role } = req.body;
+  if (!email || !password || !role) {
+    return res
+      .status(400)
+      .json({ error: "Email, password y role son requeridos" });
+  }
+
+  try {
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName,
+    });
+
+    await setUserRole(userRecord.uid, role);
+
+    const newUser = {
+      uid: userRecord.uid,
+      email: userRecord.email,
+      displayName: userRecord.displayName,
+      role: role,
+    };
+
+    db.data.users.push(newUser);
+    await db.write();
+
+    res.status(201).json(newUser);
+  } catch (error) {
+    console.error("Error creando usuario:", error);
+    if (error.code === 'auth/configuration-not-found') {
+        return res.status(500).json({ 
+            error: "Firebase Authentication is not configured.",
+            detail: "Please go to your Firebase Console, enable Authentication, and add 'Email/Password' as a sign-in method."
+        });
+    }
+    res.status(500).json({ error: "Error al crear usuario" });
+  }
+});
+
+// Get all users (TEMPORARILY PUBLIC)
+app.get("/users", (req, res) => {
+  res.json(db.data.users);
+});
+
+// Get user by ID (TEMPORARILY PUBLIC)
+app.get("/users/:id", async (req, res) => {
+  const { id } = req.params;
+  const user = db.data.users.find((u) => u.uid === id);
+  if (user) {
+    res.json(user);
+  } else {
+    res.status(404).json({ error: "Usuario no encontrado" });
+  }
+});
+
+// Update user (TEMPORARILY PUBLIC)
+app.put("/users/:id", async (req, res) => {
+  const { id } = req.params;
+  const { displayName, role } = req.body;
+
+  try {
+    const userIndex = db.data.users.findIndex((u) => u.uid === id);
+    if (userIndex === -1) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const user = db.data.users[userIndex];
+    const updateData = {};
+    if (displayName) {
+      updateData.displayName = displayName;
+      user.displayName = displayName;
+    }
+
+    await admin.auth().updateUser(id, updateData);
+
+    if (role) {
+      await setUserRole(id, role);
+      user.role = role;
+    }
+    
+    await db.write();
+
+    res.json(user);
+  } catch (error) {
+    console.error(`Error actualizando usuario ${id}:`, error);
+    res.status(500).json({ error: "Error al actualizar usuario" });
+  }
+});
+
+// Delete user (TEMPORARILY PUBLIC)
+app.delete("/users/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await admin.auth().deleteUser(id);
+
+    const userIndex = db.data.users.findIndex((u) => u.uid === id);
+    if (userIndex > -1) {
+      db.data.users.splice(userIndex, 1);
+      await db.write();
+    }
+
+    res.status(200).json({ ok: true, message: "Usuario eliminado" });
+  } catch (error) {
+    console.error(`Error eliminando usuario ${id}:`, error);
+    res.status(500).json({ error: "Error al eliminar usuario" });
+  }
+});
+
+
+// ------------------------
+
+
 // Manejo de errores
 app.use((err, req, res, next) => {
   console.error(err);
